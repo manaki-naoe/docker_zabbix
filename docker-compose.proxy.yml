@@ -1,0 +1,122 @@
+version: '3'
+
+services:
+
+  # MySQL
+  zabbix-mysql:
+    image: mysql:5.7
+    container_name: zabbix-mysql
+    command: mysqld --character-set-server=utf8
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    expose:
+      - "3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-docker}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-zabbix}
+      MYSQL_USER: ${MYSQL_USER:-zabbix}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-zabbix}
+      TZ: Asia/Tokyo
+    networks:
+      nginx-proxy:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # zabbix-server
+  zabbix-server:
+    image: sunsoft/zabbix-server
+    container_name: zabbix-server
+    volumes:
+      - ./data/zabbix:/var/lib/zabbix
+    environment:
+      DB_SERVER_HOST: zabbix-mysql
+      MYSQL_USER: ${MYSQL_USER:-zabbix}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-zabbix}
+      ZBX_PROXYCONFIGFREQUENCY: ${ZBX_PROXYCONFIGFREQUENCY:-3600}
+    networks:
+      nginx-proxy:
+    expose:
+      - "10051"
+    depends_on:
+      - zabbix-mysql
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # zabbix-web
+  zabbix-web:
+    image: sunsoft/zabbix-web
+    container_name: zabbix-web
+    environment:
+      VIRTUAL_HOST: ${VIRTUAL_HOST:?err}
+      VIRTUAL_PORT: ${VIRTUAL_PORT:-80}
+      DB_SERVER_HOST: zabbix-mysql
+      ZBX_SERVER_HOST: zabbix-server
+      MYSQL_USER: ${MYSQL_USER:-zabbix}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-zabbix}
+      PHP_TZ: Asia/Tokyo
+    networks:
+      nginx-proxy:
+    expose:
+      - "80"
+    depends_on:
+      - zabbix-mysql
+      - zabbix-server
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # zabbix-agent
+  zabbix-agent:
+    image: zabbix/zabbix-agent:alpine-4.2-latest
+    container_name: zabbix-agent
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+    networks:
+      nginx-proxy:
+    expose:
+      - "10050"
+    depends_on:
+      - zabbix-server
+    privileged: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # zabbix-postfix
+  zabbix-postfix:
+    image: sunsoft/zabbix-postfix
+    container_name: zabbix-postfix
+    volumes:
+      - ./zabbix-web/mount_config/domainkeys:/etc/opendkim/domainkeys
+    networks:
+      nginx-proxy:
+    expose:
+      - "25"
+    environment:
+      maildomain: ${MAILDOMAIN?err}
+      smtp_user: ${SMTP_USER:-zabbix:zabbix}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+networks:
+  nginx-proxy:
+    external:
+      name: nginx-proxy_default
